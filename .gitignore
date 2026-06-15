@@ -1,0 +1,39 @@
+# macOS / editor
+.DS_Store
+*.swp
+*.swo
+
+# Runtime logs
+*.log
+nohup.out
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Large raw and intermediate geospatial data
+*.tif
+*.tiff
+*.tif.ovr
+*.tiff.ovr
+*.aux.xml
+*.osm.pbf
+*.nc
+
+# Keep lightweight generated previews, reports, dashboards, scripts, and GeoPackage extracts.
+!output/osm_lines.gpkg
+!output/osm_polys.gpkg
+!output/*.html
+!output/*.md
+!output/*.py
+!output/*.js
+!output/*.sh
+!output/*.csv
+!output/*.json
+!output/*.png
+!output/previews/*.png
+!output/ppt_preview/*.jpg
+!output/ppt_preview/*.pdf
+!output/*.pptx
+
