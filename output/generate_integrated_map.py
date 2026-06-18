@@ -35,6 +35,17 @@ RIVERS = {
     "naryn_minor": {"label":"纳伦支流群",            "color":"#90CAF9","width":1.5, "names":["Малый Нарын","Ат-Баши","Ат Башы","Джумгал","Арпа","Суусамыр","Көкөмерен"],"basin":"锡尔河","dest_country":"内部","dest":"→ 纳伦河"},
 }
 
+# ── 流域配色（按流域统一着色，与图例「流域归属」一一对应）──────────────────────
+# 同一流域内的所有河流共用一个颜色，使地图真正按流域着色。
+BASIN_COLORS = {
+    "锡尔河": "#4196DE",
+    "塔里木": "#FF6B35",
+    "楚河":   "#2DC653",
+    "塔拉斯": "#A8D8EA",
+}
+for _r in RIVERS.values():
+    _r["color"] = BASIN_COLORS[_r["basin"]]
+
 # ── 水体定义 ──────────────────────────────────────────────────────────────────
 OSM_LAKES = {
     "issyk_kul": {"label":"伊塞克湖","color":"#1E90FF","names":["Ысык-Көл"],"area_km2":6236,"note":"内流湖，海拔1607 m"},
@@ -566,7 +577,6 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;
       <div class="leg-row"><div class="leg-line" style="background:#FF6B35"></div>塔里木流域（→中国）</div>
       <div class="leg-row"><div class="leg-line" style="background:#2DC653"></div>楚河（→哈萨克斯坦）</div>
       <div class="leg-row"><div class="leg-line" style="background:#A8D8EA"></div>塔拉斯（→哈萨克斯坦）</div>
-      <div class="leg-row"><div class="leg-line" style="background:#C77DFF"></div>卡拉达里亚（→乌兹别）</div>
       <hr style="border-color:var(--border);margin:6px 0">
       <div class="leg-row"><div class="leg-sq" style="background:#1E90FF"></div>伊塞克湖</div>
       <div class="leg-row"><div class="leg-sq" style="background:#00B4D8"></div>托克托古尔水库</div>

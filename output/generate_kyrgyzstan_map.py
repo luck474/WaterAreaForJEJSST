@@ -119,6 +119,17 @@ RIVERS = {
     },
 }
 
+# ── 流域配色（按流域统一着色，与图例「流域归属」一一对应）──────────────────────
+# 同一流域内的所有河流共用一个颜色，使地图真正按流域着色。
+BASIN_COLORS = {
+    "锡尔河流域": "#4196DE",
+    "塔里木流域": "#FF6B35",
+    "楚河流域":   "#2DC653",
+    "塔拉斯流域": "#A8D8EA",
+}
+for _rinfo in RIVERS.values():
+    _rinfo["color"] = BASIN_COLORS[_rinfo["basin"]]
+
 # ── 水体（湖泊/水库）定义 ─────────────────────────────────────────────────────
 # 托克托古尔用 Sentinel-2 2025 实测边界替代 OSM 满水位边界（精度更高）
 WATERBODIES = {
@@ -702,7 +713,6 @@ html,body{{height:100%;font-family:'Segoe UI',system-ui,sans-serif;
       <div class="leg-row"><div class="leg-line" style="background:#FF6B35"></div>塔里木流域（→中国）</div>
       <div class="leg-row"><div class="leg-line" style="background:#2DC653"></div>楚河流域（→哈萨克）</div>
       <div class="leg-row"><div class="leg-line" style="background:#A8D8EA"></div>塔拉斯流域（→哈萨克）</div>
-      <div class="leg-row"><div class="leg-line" style="background:#C77DFF"></div>卡拉达里亚（→乌兹别）</div>
       <div class="leg-row"><div class="leg-dot" style="background:#1E90FF"></div>伊塞克湖</div>
       <div class="leg-row"><div class="leg-dot" style="background:#00B4D8"></div>托克托古尔水库</div>
     </div>
