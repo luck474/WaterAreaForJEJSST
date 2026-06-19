@@ -13,6 +13,7 @@ OSM PBF → GeoJSON (OGR) → Leaflet 交互地图
 """
 
 import json
+import re
 import warnings
 from pathlib import Path
 from osgeo import ogr, osr
@@ -21,14 +22,15 @@ warnings.filterwarnings("ignore")
 ogr.UseExceptions()
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-OUT       = Path(__file__).resolve().parent
-BASE      = OUT.parent
+# 项目根目录：脚本位于 <BASE>/output/ 下，自动解析以保证可移植
+BASE      = Path(__file__).resolve().parent.parent
+OUT       = BASE / "output"
 LINES_GPKG = OUT / "osm_lines.gpkg"    # pre-extracted waterway lines
 POLYS_GPKG = OUT / "osm_polys.gpkg"    # pre-extracted water body polygons
 OUT.mkdir(exist_ok=True)
 
 # ── 主要河流定义（流域 / 颜色 / 跨境去向）────────────────────────────────────
-# 名称列表默认用于 OSM name 字段的包含匹配；个别短名称河流可配置 exact_names。
+# 名称列表用于 OSM name 字段的包含匹配
 RIVERS = {
     "naryn": {
         "label": "纳伦河 Naryn",
@@ -36,9 +38,7 @@ RIVERS = {
         "basin": "锡尔河流域",
         "dest":  "→ 锡尔河 → 咸海",
         "dest_country": "乌兹别克斯坦 / 哈萨克斯坦",
-        "names_ky": ["Нарын"],   # Kyrgyz/Russian name fragments
-        "exact_names": ["Нарын"],
-        "waterways": ["river"],
+        "names_ky": ["Нарын", "Нарыне"],   # Kyrgyz/Russian name fragments
         "length_km": 807,
         "width": 3,
     },
@@ -58,10 +58,8 @@ RIVERS = {
         "basin": "楚河流域",
         "dest":  "→ 消失于哈萨克斯坦草原",
         "dest_country": "哈萨克斯坦",
-        "names_ky": ["Чүй", "Чу", "Шу"],
-        "exact_names": ["Чүй", "Чу", "Шу", "Чүй / Шу", "Чү / Шу", "Кочкор", "Жоон-Арык"],
-        "waterways": ["river"],
-        "length_km": 1186,
+        "names_ky": ["Чүй", "Чуйск", "Чу", "Шу"],
+        "length_km": 1067,
         "width": 2.5,
     },
     "talas": {
@@ -71,8 +69,6 @@ RIVERS = {
         "dest":  "→ 消失于哈萨克斯坦",
         "dest_country": "哈萨克斯坦",
         "names_ky": ["Талас"],
-        "exact_names": ["Талас"],
-        "waterways": ["river"],
         "length_km": 661,
         "width": 2,
     },
@@ -90,7 +86,7 @@ RIVERS = {
         "label": "恰特卡尔河 Chatkal",
         "color": "#F4A261",
         "basin": "锡尔河流域",
-        "dest":  "→ 奇尔奇克河 → 锡尔河",
+        "dest":  "→ 纳伦河 → 锡尔河",
         "dest_country": "乌兹别克斯坦",
         "names_ky": ["Чаткал"],
         "length_km": 345,
@@ -100,7 +96,7 @@ RIVERS = {
         "label": "科克沙尔河 Kokshal",
         "color": "#E63946",
         "basin": "塔里木流域",
-        "dest":  "→ 托什干/卡克沙尔 → 阿克苏河 → 塔里木河",
+        "dest":  "→ 萨雷扎兹河 → 中国",
         "dest_country": "中国（新疆）",
         "names_ky": ["Кокшаал"],
         "length_km": 200,
@@ -113,22 +109,11 @@ RIVERS = {
         "dest":  "→ 纳伦河",
         "dest_country": "吉尔吉斯斯坦内",
         "names_ky": ["Малый Нарын", "Ат-Баши", "Ат Башы", "Джумгал", "Арпа",
-                     "Суусамыр", "Кёкёмерен", "Көкөмерен"],
+                     "Суусамыр", "Кочкор", "Кёкёмерен", "Көкөмерен"],
         "length_km": None,
         "width": 1.5,
     },
 }
-
-# ── 流域配色（按流域统一着色，与图例「流域归属」一一对应）──────────────────────
-# 同一流域内的所有河流共用一个颜色，使地图真正按流域着色。
-BASIN_COLORS = {
-    "锡尔河流域": "#4196DE",
-    "塔里木流域": "#FF6B35",
-    "楚河流域":   "#2DC653",
-    "塔拉斯流域": "#A8D8EA",
-}
-for _rinfo in RIVERS.values():
-    _rinfo["color"] = BASIN_COLORS[_rinfo["basin"]]
 
 # ── 水体（湖泊/水库）定义 ─────────────────────────────────────────────────────
 # 托克托古尔用 Sentinel-2 2025 实测边界替代 OSM 满水位边界（精度更高）
@@ -182,14 +167,18 @@ def geom_to_coords(geom):
     return []
 
 
-def name_matches(name, patterns, exact=False):
-    """Check if OSM name field matches any of the given Kyrgyz/Russian name fragments."""
+def name_matches(name, patterns):
+    """Match OSM name on word boundaries so short tokens like 'Чу'/'Шу' don't
+    spuriously hit 'ашуу' (mountain pass) / 'Чупра' etc. Short patterns (<4 chars)
+    require both left+right word boundaries; longer stems may carry a suffix
+    (e.g. Талас→Таласский, Кочкор→Кочкорчи)."""
     if not name:
         return False
-    name_lower = name.lower()
-    if exact:
-        return name_lower in {p.lower() for p in patterns}
-    return any(p.lower() in name_lower for p in patterns)
+    for p in patterns:
+        right = r'(?!\w)' if len(p) < 4 else ''
+        if re.search(r'(?<!\w)' + re.escape(p) + right, name, re.IGNORECASE):
+            return True
+    return False
 
 
 def simplify_coords(coords_list, tolerance=0.005):
@@ -221,16 +210,13 @@ for rkey, rinfo in RIVERS.items():
     lines_lyr.ResetReading()
     features = []
     seen_ids = set()
-    allowed_waterways = set(rinfo.get("waterways", ("river", "stream", "canal")))
-    exact_names = rinfo.get("exact_names")
-    name_patterns = exact_names or rinfo["names_ky"]
 
     for feat in lines_lyr:
         wtype = feat.GetField("waterway")
-        if not wtype or wtype not in allowed_waterways:
+        if not wtype or wtype not in ("river", "stream", "canal"):
             continue
         name = feat.GetField("name") or ""
-        if not name_matches(name, name_patterns, exact=bool(exact_names)):
+        if not name_matches(name, rinfo["names_ky"]):
             continue
 
         fid = feat.GetFID()
@@ -713,6 +699,7 @@ html,body{{height:100%;font-family:'Segoe UI',system-ui,sans-serif;
       <div class="leg-row"><div class="leg-line" style="background:#FF6B35"></div>塔里木流域（→中国）</div>
       <div class="leg-row"><div class="leg-line" style="background:#2DC653"></div>楚河流域（→哈萨克）</div>
       <div class="leg-row"><div class="leg-line" style="background:#A8D8EA"></div>塔拉斯流域（→哈萨克）</div>
+      <div class="leg-row"><div class="leg-line" style="background:#C77DFF"></div>卡拉达里亚（→乌兹别）</div>
       <div class="leg-row"><div class="leg-dot" style="background:#1E90FF"></div>伊塞克湖</div>
       <div class="leg-row"><div class="leg-dot" style="background:#00B4D8"></div>托克托古尔水库</div>
     </div>

@@ -19,21 +19,3 @@ __pycache__/
 *.tiff.ovr
 *.aux.xml
 *.osm.pbf
-*.nc
-
-# Keep lightweight generated previews, reports, dashboards, scripts, and GeoPackage extracts.
-!output/osm_lines.gpkg
-!output/osm_polys.gpkg
-!output/*.html
-!output/*.md
-!output/*.py
-!output/*.js
-!output/*.sh
-!output/*.csv
-!output/*.json
-!output/*.png
-!output/previews/*.png
-!output/ppt_preview/*.jpg
-!output/ppt_preview/*.pdf
-!output/*.pptx
-

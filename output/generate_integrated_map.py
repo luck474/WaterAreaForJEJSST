@@ -8,7 +8,7 @@ ERA5 气候数据接入后自动升级精度层。
 产出：output/integrated_map.html
 """
 
-import json, warnings
+import json, re, warnings
 from pathlib import Path
 from osgeo import ogr, gdal, osr
 import numpy as np
@@ -16,8 +16,9 @@ import numpy as np
 warnings.filterwarnings("ignore")
 ogr.UseExceptions()
 
-OUT        = Path(__file__).resolve().parent
-BASE       = OUT.parent
+# 项目根目录：脚本位于 <BASE>/output/ 下，自动解析以保证可移植
+BASE       = Path(__file__).resolve().parent.parent
+OUT        = BASE / "output"
 LINES_GPKG = OUT / "osm_lines.gpkg"
 POLYS_GPKG = OUT / "osm_polys.gpkg"
 MOSAIC_DIR = OUT / "mosaics"
@@ -25,26 +26,15 @@ ERA5_DIR   = BASE / "climate_data"
 
 # ── 河流定义 ──────────────────────────────────────────────────────────────────
 RIVERS = {
-    "naryn":       {"label":"纳伦河 Naryn",        "color":"#4196DE","width":3,   "names":["Нарын"],"exact_names":["Нарын"],"waterways":["river"],"basin":"锡尔河","dest_country":"乌/哈","dest":"→ 锡尔河 → 咸海"},
+    "naryn":       {"label":"纳伦河 Naryn",        "color":"#4196DE","width":3,   "names":["Нарын"],"basin":"锡尔河","dest_country":"乌/哈","dest":"→ 锡尔河 → 咸海"},
     "sary_jaz":    {"label":"萨雷扎兹河 Sary-Jaz", "color":"#FF6B35","width":2.5, "names":["Сарыджаз","Сарыжаз","Сары-Жаз"],"basin":"塔里木","dest_country":"中国（新疆）","dest":"→ 库玛力克 → 阿克苏 → 塔里木河"},
-    "chui":        {"label":"楚河 Chui",            "color":"#2DC653","width":2.5, "names":["Чүй","Чу","Шу"],"exact_names":["Чүй","Чу","Шу","Чүй / Шу","Чү / Шу","Кочкор","Жоон-Арык"],"waterways":["river"],"basin":"楚河","dest_country":"哈萨克斯坦","dest":"→ 消失于哈萨克草原"},
-    "talas":       {"label":"塔拉斯河 Talas",       "color":"#A8D8EA","width":2,   "names":["Талас"],"exact_names":["Талас"],"waterways":["river"],"basin":"塔拉斯","dest_country":"哈萨克斯坦","dest":"→ 哈萨克斯坦"},
+    "chui":        {"label":"楚河 Chui",            "color":"#2DC653","width":2.5, "names":["Чүй","Чуйск","Чу","Шу"],"basin":"楚河","dest_country":"哈萨克斯坦","dest":"→ 消失于哈萨克草原"},
+    "talas":       {"label":"塔拉斯河 Talas",       "color":"#A8D8EA","width":2,   "names":["Талас"],"basin":"塔拉斯","dest_country":"哈萨克斯坦","dest":"→ 哈萨克斯坦"},
     "kara_darya":  {"label":"卡拉达里亚",           "color":"#C77DFF","width":2,   "names":["Карадарья","Кара-Кулжа","Qoradaryo"],"basin":"锡尔河","dest_country":"乌兹别克斯坦","dest":"→ 锡尔河"},
-    "chatkal":     {"label":"恰特卡尔河 Chatkal",   "color":"#F4A261","width":2,   "names":["Чаткал"],"basin":"锡尔河","dest_country":"乌兹别克斯坦","dest":"→ 奇尔奇克 → 锡尔河"},
-    "kokshaal":    {"label":"科克沙尔河 Kokshal",   "color":"#E63946","width":2,   "names":["Кокшаал"],"basin":"塔里木","dest_country":"中国（新疆）","dest":"→ 托什干/卡克沙尔 → 阿克苏 → 塔里木河"},
-    "naryn_minor": {"label":"纳伦支流群",            "color":"#90CAF9","width":1.5, "names":["Малый Нарын","Ат-Баши","Ат Башы","Джумгал","Арпа","Суусамыр","Көкөмерен"],"basin":"锡尔河","dest_country":"内部","dest":"→ 纳伦河"},
+    "chatkal":     {"label":"恰特卡尔河 Chatkal",   "color":"#F4A261","width":2,   "names":["Чаткал"],"basin":"锡尔河","dest_country":"乌兹别克斯坦","dest":"→ 纳伦 → 锡尔河"},
+    "kokshaal":    {"label":"科克沙尔河 Kokshal",   "color":"#E63946","width":2,   "names":["Кокшаал"],"basin":"塔里木","dest_country":"中国（新疆）","dest":"→ 萨雷扎兹 → 中国"},
+    "naryn_minor": {"label":"纳伦支流群",            "color":"#90CAF9","width":1.5, "names":["Малый Нарын","Ат-Баши","Ат Башы","Джумгал","Арпа","Суусамыр","Кочкор","Көкөмерен"],"basin":"锡尔河","dest_country":"内部","dest":"→ 纳伦河"},
 }
-
-# ── 流域配色（按流域统一着色，与图例「流域归属」一一对应）──────────────────────
-# 同一流域内的所有河流共用一个颜色，使地图真正按流域着色。
-BASIN_COLORS = {
-    "锡尔河": "#4196DE",
-    "塔里木": "#FF6B35",
-    "楚河":   "#2DC653",
-    "塔拉斯": "#A8D8EA",
-}
-for _r in RIVERS.values():
-    _r["color"] = BASIN_COLORS[_r["basin"]]
 
 # ── 水体定义 ──────────────────────────────────────────────────────────────────
 OSM_LAKES = {
@@ -78,24 +68,24 @@ ERA5_READY = era5_t2m.exists() and era5_precip.exists()
 print(f"ERA5 数据: {'✅ 已就绪' if ERA5_READY else '⏳ 待下载（地图框架先行生成）'}")
 
 # ══ OGR 提取函数 ══════════════════════════════════════════════════════════════
-def name_matches(name, patterns, exact=False):
+def name_matches(name, patterns):
+    """按词边界匹配，避免 'Чу'/'Шу' 等短串误命中 'ашуу'(山口)/'Чупра' 等无关河流。
+    短串(<4字符)要求左右均为词边界；长词干允许带后缀(如 Талас→Таласский)。"""
     if not name: return False
-    nl = name.lower()
-    if exact:
-        return nl in {p.lower() for p in patterns}
-    return any(p.lower() in nl for p in patterns)
+    for p in patterns:
+        right = r'(?!\w)' if len(p) < 4 else ''
+        if re.search(r'(?<!\w)' + re.escape(p) + right, name, re.IGNORECASE):
+            return True
+    return False
 
-def extract_lines(gpkg, layer, river_info, simplify=0.003):
+def extract_lines(gpkg, layer, patterns, simplify=0.003):
     ds = ogr.Open(str(gpkg)); lyr = ds.GetLayerByName(layer)
-    allowed_waterways = set(river_info.get("waterways", ("river","stream","canal")))
-    exact_names = river_info.get("exact_names")
-    patterns = exact_names or river_info["names"]
     features, seen = [], set()
     for feat in lyr:
         wt = feat.GetField("waterway")
-        if not wt or wt not in allowed_waterways: continue
+        if not wt or wt not in ("river","stream","canal"): continue
         name = feat.GetField("name") or ""
-        if not name_matches(name, patterns, exact=bool(exact_names)): continue
+        if not name_matches(name, patterns): continue
         fid = feat.GetFID()
         if fid in seen: continue
         seen.add(fid)
@@ -219,7 +209,7 @@ def vectorize_toktogul(simplify_deg=0.001, min_km2=1.0):
 print("提取河流…")
 river_gj = {}
 for rk, ri in RIVERS.items():
-    fc = extract_lines(LINES_GPKG, "waterways", ri)
+    fc = extract_lines(LINES_GPKG, "waterways", ri["names"])
     river_gj[rk] = fc
     print(f"  {ri['label']:30s} {len(fc['features'])} 段")
 
@@ -577,6 +567,7 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,sans-serif;
       <div class="leg-row"><div class="leg-line" style="background:#FF6B35"></div>塔里木流域（→中国）</div>
       <div class="leg-row"><div class="leg-line" style="background:#2DC653"></div>楚河（→哈萨克斯坦）</div>
       <div class="leg-row"><div class="leg-line" style="background:#A8D8EA"></div>塔拉斯（→哈萨克斯坦）</div>
+      <div class="leg-row"><div class="leg-line" style="background:#C77DFF"></div>卡拉达里亚（→乌兹别）</div>
       <hr style="border-color:var(--border);margin:6px 0">
       <div class="leg-row"><div class="leg-sq" style="background:#1E90FF"></div>伊塞克湖</div>
       <div class="leg-row"><div class="leg-sq" style="background:#00B4D8"></div>托克托古尔水库</div>
